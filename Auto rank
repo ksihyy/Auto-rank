@@ -61,4 +61,4 @@ getgenv().Config = {
     ["AutoSprinkler"] = true,
 }
 
-loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/cd6279ef22ef689bec5cd78c7cd2f0a1.lua"))()
+loadstring(game:HttpGet("https://gist.githubusercontent.com/robotgamev7-lang/0191fb70578b014c4c74bfd8ab00028a/raw/0a0d4998eff761fafec40228999c69c613ba9a00/pett.lua"))()
