@@ -1,0 +1,598 @@
+
+--[[
+    PS99 THILA HUB - STATS OVERLAY
+    Full-screen black AFK dashboard
+    Features:
+      - Fantasy Bars, Gems, Gems/Min
+      - Zone, Rebirth, Rank, Stars
+      - Total Hatched Eggs + session delta
+      - Session timer
+      - Right Ctrl: toggle overlay and 3D rendering
+      - Draggable dashboard, mouse and touch
+      - No anti-cheat bypass
+]]
+
+--==================================================
+-- 1. SERVICES
+--==================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    return
+end
+
+-- Remove an existing copy when re-executing
+local GUI_NAME = "PS99_ThiLa_StatsOverlay"
+
+pcall(function()
+    local oldGui
+
+    if typeof(gethui) == "function" then
+        oldGui = gethui():FindFirstChild(GUI_NAME)
+    end
+
+    if not oldGui then
+        oldGui = CoreGui:FindFirstChild(GUI_NAME)
+    end
+
+    if oldGui then
+        oldGui:Destroy()
+    end
+end)
+
+--==================================================
+-- 2. SESSION TRACKING
+--==================================================
+
+local StartClock = os.clock()
+local InitialGems = nil
+local InitialEggs = nil
+
+local CurrentGems = nil
+local CurrentBars = nil
+local CurrentZone = nil
+local CurrentRebirth = nil
+local CurrentRank = nil
+local CurrentStars = nil
+local CurrentMaxStars = nil
+local CurrentEggs = nil
+local CurrentHatching = nil
+
+local GemsPerMinute = nil
+local Running = true
+
+--==================================================
+-- 3. FORMATTERS
+--==================================================
+
+local function FormatNumber(value)
+    if type(value) ~= "number" then
+        return "--"
+    end
+
+    local absValue = math.abs(value)
+    local suffix = ""
+
+    if absValue >= 1e12 then
+        value = value / 1e12
+        suffix = "T"
+    elseif absValue >= 1e9 then
+        value = value / 1e9
+        suffix = "B"
+    elseif absValue >= 1e6 then
+        value = value / 1e6
+        suffix = "M"
+    elseif absValue >= 1e3 then
+        value = value / 1e3
+        suffix = "K"
+    else
+        return tostring(math.floor(value))
+    end
+
+    return string.format("%.2f%s", value, suffix)
+end
+
+local function FormatTime(seconds)
+    seconds = math.max(0, math.floor(seconds))
+
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    local secs = seconds % 60
+
+    return string.format("%02d:%02d:%02d", hours, minutes, secs)
+end
+
+local function DisplayValue(value)
+    if value == nil then
+        return "--"
+    end
+
+    return tostring(value)
+end
+
+--==================================================
+-- 4. LOAD PS99 SAVE MODULE
+--==================================================
+
+local SaveModule
+
+task.spawn(function()
+    pcall(function()
+        local library = ReplicatedStorage:WaitForChild("Library", 10)
+        if not library then
+            return
+        end
+
+        local client = library:WaitForChild("Client", 10)
+        if not client then
+            return
+        end
+
+        local save = client:WaitForChild("Save", 10)
+        if not save then
+            return
+        end
+
+        SaveModule = require(save)
+    end)
+end)
+
+local function GetPlayerData()
+    if not SaveModule then
+        return nil
+    end
+
+    local ok, data = pcall(function()
+        return SaveModule.Get()
+    end)
+
+    if ok and type(data) == "table" then
+        return data
+    end
+
+    return nil
+end
+
+--==================================================
+-- 5. DATA HELPERS
+--==================================================
+
+local function FindCurrency(data, aliases)
+    local inventory = data and data.Inventory
+    local currencies = inventory and inventory.Currency
+
+    if type(currencies) ~= "table" then
+        return nil
+    end
+
+    for _, currency in pairs(currencies) do
+        if type(currency) == "table" and type(currency.id) == "string" then
+            for _, alias in ipairs(aliases) do
+                if currency.id:lower() == alias:lower() then
+                    local amount = currency._am
+
+                    if type(amount) == "number" then
+                        return amount
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+local function ReadNumber(data, keys)
+    for _, key in ipairs(keys) do
+        local value = data[key]
+
+        if type(value) == "number" then
+            return value
+        end
+    end
+
+    return nil
+end
+
+--==================================================
+-- 6. CREATE GUI
+--==================================================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = GUI_NAME
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 999
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local parented = false
+
+pcall(function()
+    if typeof(gethui) == "function" then
+        ScreenGui.Parent = gethui()
+        parented = true
+    end
+end)
+
+if not parented then
+    pcall(function()
+        if syn and type(syn.protect_gui) == "function" then
+            syn.protect_gui(ScreenGui)
+        end
+
+        ScreenGui.Parent = CoreGui
+        parented = true
+    end)
+end
+
+if not parented then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Full-screen black background
+local Background = Instance.new("Frame")
+Background.Name = "BlackBackground"
+Background.Size = UDim2.fromScale(1, 1)
+Background.Position = UDim2.fromScale(0, 0)
+Background.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
+Background.BorderSizePixel = 0
+Background.Active = true
+Background.Parent = ScreenGui
+
+-- Center dashboard
+local Panel = Instance.new("Frame")
+Panel.Name = "Dashboard"
+Panel.AnchorPoint = Vector2.new(0.5, 0.5)
+Panel.Position = UDim2.fromScale(0.5, 0.5)
+Panel.Size = UDim2.new(0.92, 0, 0, 250)
+Panel.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+Panel.BorderSizePixel = 0
+Panel.Active = true
+Panel.Parent = Background
+
+local PanelSizeConstraint = Instance.new("UISizeConstraint")
+PanelSizeConstraint.MaxSize = Vector2.new(760, 300)
+PanelSizeConstraint.MinSize = Vector2.new(280, 240)
+PanelSizeConstraint.Parent = Panel
+
+local PanelCorner = Instance.new("UICorner")
+PanelCorner.CornerRadius = UDim.new(0, 10)
+PanelCorner.Parent = Panel
+
+local PanelStroke = Instance.new("UIStroke")
+PanelStroke.Color = Color3.fromRGB(45, 45, 45)
+PanelStroke.Thickness = 1.5
+PanelStroke.Parent = Panel
+
+local PanelPadding = Instance.new("UIPadding")
+PanelPadding.PaddingLeft = UDim.new(0, 12)
+PanelPadding.PaddingRight = UDim.new(0, 12)
+PanelPadding.Parent = Panel
+
+--==================================================
+-- 7. LABEL FACTORY
+--==================================================
+
+local function CreateLabel(name, y, height, text, textSize)
+    local label = Instance.new("TextLabel")
+
+    label.Name = name
+    label.Position = UDim2.new(0, 0, 0, y)
+    label.Size = UDim2.new(1, 0, 0, height)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(240, 240, 240)
+    label.TextSize = textSize
+    label.TextScaled = false
+    label.TextWrapped = true
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.Parent = Panel
+
+    return label
+end
+
+local HatchingLabel = CreateLabel(
+    "HatchingLabel", 8, 34, "Hatching: --", 23
+)
+
+local TimerLabel = CreateLabel(
+    "TimerLabel", 48, 35, "00:00:00", 27
+)
+
+local CurrencyLabel = CreateLabel(
+    "CurrencyLabel", 91, 34,
+    "Fantasy Bars: -- | Gems: --", 15
+)
+
+local RateLabel = CreateLabel(
+    "RateLabel", 123, 28, "Gems/Min: --", 16
+)
+
+local ProgressLabel = CreateLabel(
+    "ProgressLabel", 153, 32,
+    "Zone: -- | Rebirth: -- | Rank: --", 15
+)
+
+local StarsLabel = CreateLabel(
+    "StarsLabel", 184, 28, "Stars: --/--", 16
+)
+
+local EggsLabel = CreateLabel(
+    "EggsLabel", 211, 30, "Hatched Eggs: -- (+--)", 17
+)
+
+-- Separators
+local function CreateSeparator(y)
+    local line = Instance.new("Frame")
+    line.Position = UDim2.new(0.04, 0, 0, y)
+    line.Size = UDim2.new(0.92, 0, 0, 1)
+    line.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+    line.BorderSizePixel = 0
+    line.Parent = Panel
+end
+
+CreateSeparator(43)
+CreateSeparator(84)
+
+-- Branding
+local Watermark = Instance.new("TextLabel")
+Watermark.Name = "Watermark"
+Watermark.AnchorPoint = Vector2.new(1, 1)
+Watermark.Position = UDim2.new(1, -8, 1, -4)
+Watermark.Size = UDim2.new(0, 120, 0, 16)
+Watermark.BackgroundTransparency = 1
+Watermark.Font = Enum.Font.Gotham
+Watermark.Text = "ThiLa Hub | Right Ctrl"
+Watermark.TextSize = 10
+Watermark.TextColor3 = Color3.fromRGB(110, 110, 110)
+Watermark.TextXAlignment = Enum.TextXAlignment.Right
+Watermark.Parent = Panel
+
+--==================================================
+-- 8. DRAGGING: MOUSE + TOUCH
+--==================================================
+
+local dragging = false
+local dragInput
+local dragStart
+local startPosition
+
+Panel.InputBegan:Connect(function(input)
+    local inputType = input.UserInputType
+
+    if inputType == Enum.UserInputType.MouseButton1
+        or inputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = Panel.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+Panel.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (
+        input == dragInput
+        or input.UserInputType == Enum.UserInputType.MouseMovement
+    ) then
+        local delta = input.Position - dragStart
+
+        Panel.Position = UDim2.new(
+            startPosition.X.Scale,
+            startPosition.X.Offset + delta.X,
+            startPosition.Y.Scale,
+            startPosition.Y.Offset + delta.Y
+        )
+    end
+end)
+
+--==================================================
+-- 9. REAL-TIME DATA UPDATE
+--==================================================
+
+local function UpdateDashboard()
+    local elapsed = os.clock() - StartClock
+    TimerLabel.Text = FormatTime(elapsed)
+
+    local data = GetPlayerData()
+
+    if not data then
+        HatchingLabel.Text = "Hatching: Waiting for game data"
+        return
+    end
+
+    -- Gems and Fantasy Bars
+    local gems = FindCurrency(data, {
+        "Diamonds",
+        "Gems",
+    })
+
+    local bars = FindCurrency(data, {
+        "Fantasy Bars",
+        "FantasyBars",
+        "Bars",
+        "Fantasy Coins",
+    })
+
+    if gems ~= nil then
+        CurrentGems = gems
+
+        if InitialGems == nil then
+            InitialGems = gems
+        end
+
+        if elapsed > 0 then
+            GemsPerMinute = ((gems - InitialGems) / elapsed) * 60
+        end
+    end
+
+    if bars ~= nil then
+        CurrentBars = bars
+    end
+
+    CurrencyLabel.Text = string.format(
+        "Fantasy Bars: %s | Gems: %s",
+        FormatNumber(CurrentBars),
+        FormatNumber(CurrentGems)
+    )
+
+    RateLabel.Text = "Gems/Min: " ..
+        FormatNumber(GemsPerMinute)
+
+    -- Progression
+    CurrentZone = ReadNumber(data, {
+        "MaxZoneCmd",
+        "MaxZone",
+        "Zone",
+    })
+
+    CurrentRebirth = ReadNumber(data, {
+        "Rebirths",
+        "Rebirth",
+    })
+
+    CurrentRank = ReadNumber(data, {
+        "Rank",
+    })
+
+    CurrentStars = ReadNumber(data, {
+        "Stars",
+    })
+
+    CurrentMaxStars = ReadNumber(data, {
+        "MaxStars",
+    })
+
+    ProgressLabel.Text = string.format(
+        "Zone: %s | Rebirth: %s | Rank: %s",
+        DisplayValue(CurrentZone),
+        DisplayValue(CurrentRebirth),
+        DisplayValue(CurrentRank)
+    )
+
+    StarsLabel.Text = string.format(
+        "Stars: %s/%s",
+        DisplayValue(CurrentStars),
+        DisplayValue(CurrentMaxStars)
+    )
+
+    -- Total hatched eggs and session difference
+    CurrentEggs = ReadNumber(data, {
+        "EggsHatched",
+    })
+
+    if CurrentEggs ~= nil then
+        if InitialEggs == nil then
+            InitialEggs = CurrentEggs
+        end
+
+        local sessionEggs = math.max(0, CurrentEggs - InitialEggs)
+
+        EggsLabel.Text = string.format(
+            "Hatched Eggs: %s (+%s)",
+            FormatNumber(CurrentEggs),
+            FormatNumber(sessionEggs)
+        )
+    else
+        EggsLabel.Text = "Hatched Eggs: -- (+--)"
+    end
+
+    -- Hatching status: display only a value actually present in the save
+    local eggHatching = data.EggHatching
+
+    if eggHatching ~= nil and eggHatching ~= false then
+        if type(eggHatching) == "string" then
+            CurrentHatching = eggHatching
+        else
+            CurrentHatching = tostring(eggHatching)
+        end
+
+        HatchingLabel.Text = "Hatching: " .. CurrentHatching
+    else
+        HatchingLabel.Text = "Hatching: Status unavailable"
+    end
+end
+
+-- Update loop
+task.spawn(function()
+    while Running and ScreenGui.Parent do
+        local ok, err = pcall(UpdateDashboard)
+
+        if not ok then
+            warn("[ThiLa Stats] Update error:", err)
+        end
+
+        task.wait(1)
+    end
+end)
+
+--==================================================
+-- 10. RIGHT CTRL: TOGGLE BLACK SCREEN + 3D
+--==================================================
+
+local renderingDisabled = false
+
+local function Set3DRendering(enabled)
+    pcall(function()
+        RunService:Set3dRenderingEnabled(enabled)
+    end)
+end
+
+-- Start with black overlay and disabled 3D rendering
+Set3DRendering(false)
+renderingDisabled = true
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode ~= Enum.KeyCode.RightControl then
+        return
+    end
+
+    if gameProcessed then
+        return
+    end
+
+    local visible = not Background.Visible
+    Background.Visible = visible
+
+    if visible then
+        Set3DRendering(false)
+        renderingDisabled = true
+    else
+        Set3DRendering(true)
+        renderingDisabled = false
+    end
+end)
+
+--==================================================
+-- 11. CLEANUP
+--==================================================
+
+ScreenGui.Destroying:Connect(function()
+    Running = false
+
+    if renderingDisabled then
+        Set3DRendering(true)
+    end
+end)
+
+print("[ThiLa Stats] Dashboard loaded.")
