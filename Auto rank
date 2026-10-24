@@ -1,0 +1,64 @@
+
+-- PS99 HUD + Config Integration
+-- Chạy trong môi trường có hỗ trợ getgenv và loadstring.
+-- Giữ nguyên config của bạn tại đây.
+
+getgenv().Config = {
+    ["Webhook"] = {
+        ["URL"] = "",
+        ["Discord Id to ping"] = {""},
+        ["Send Normal Huges"] = true,
+        ["Rank Updates"] = "",
+        ["Rank Update Min"] = 20,
+        ["Admin Abuse"] = "",
+        ["TitanicPresentWebhook"] = "",
+    },
+
+    ["Mail Settings"] = {
+        ["User"] = "lamkaten",
+        ["Min_Gems"] = 10000000,
+        ["MAX_MAIL_COST"] = 9999999999,
+        ["Mailing"] = {},
+        ["Send Old Huges"] = true,
+    },
+
+    ["Auto Enchant"] = {
+        "Treasure Hunter",
+        "Treasure Hunter",
+        "Diamonds",
+        "Diamonds",
+        "Criticals",
+        "Strong Pets",
+    },
+
+    ["CPU Saver"] = false,
+    ["MaxEggSlots"] = 50,
+    ["MaxPetSlots"] = 40,
+
+    ["Progress Limits"] = {
+        ["Max Rank"] = false,
+        ["Max Area"] = false,
+    },
+
+    ["Ignore Do Ranks"] = false,
+    ["Fast Rankup"] = false,
+    ["Fast Rankup to"] = 20,
+    ["StarterPets"] = false,
+    ["ClaimFreeStuff"] = true,
+    ["MaxUpgradeCost"] = 200000,
+    ["OpenKeys"] = true,
+    ["FarmBalloons"] = true,
+    ["FarmBallonsOnlyInZone"] = false,
+    ["FarmMiniChests"] = true,
+    ["AutoMinigames"] = true,
+    ["OpenPresent"] = false,
+    ["AutoCombinePresents"] = false,
+    ["MaxCombineTier"] = 4,
+    ["AutoConsumeFlag"] = {
+        "Strength Flag",
+        "Hasty Flag",
+    },
+    ["AutoSprinkler"] = true,
+}
+
+loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/cd6279ef22ef689bec5cd78c7cd2f0a1.lua"))()
